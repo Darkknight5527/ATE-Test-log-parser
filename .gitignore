@@ -1,0 +1,46 @@
+# ======================================================================
+#  DATA POLICY: no tester data, no company/customer data in this repo.
+#  Real datalogs and reports live OUTSIDE the repo folder.
+# ======================================================================
+# Datalogs (all STDF/ATDF variants)
+*.stdf
+*.std
+*.stdf.gz
+*.std.gz
+*.STDF
+*.atdf
+*.wat
+# Reports / spreadsheets / exports (may contain real measurements)
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+*.tsv
+*.pdf
+*.docx
+*.pptx
+# Folders for real data, kept local only
+data/
+datalogs/
+reports/
+private/
+screenshots/
+# Local-only list of words that must never be committed (see tools/check_repo_clean.py)
+.private_denylist.txt
+# User settings (may hold customer test names)
+settings.json
+# Build output
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc
+.venv/
+venv/
+.idea/
+.vscode/
+# Synthetic demo data IS allowed (generated, contains no real data)
+!demo/**
+# Device profiles hold product test names: keep them on your PC only (examples/ is allowed)
+*.json
+!examples/*.json

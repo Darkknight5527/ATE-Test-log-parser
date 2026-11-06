@@ -1,0 +1,11 @@
+{
+  "name": "Example device (fake test names - copy and edit for your product)",
+  "readback_test": "Read_Device_ID",
+  "blown_bit_regex": "ID_BIT(?P<bit>\\d+)_(?P<un>UN)?PROGRAMMED",
+  "compare_suites": ["Post_Trim_Gain", "Post_Trim_Offset", "UVLO_Threshold"],
+  "device_regex": "(DEV\\d+)",
+  "temperature_rules": [["Cold", "COLD|_-40_"], ["Hot", "HOT|_125_"], ["Room", "ROOM|_25_"]],
+  "excluded_tags": ["SANITY", "FIFO", "ENG", "SAMPLE"],
+  "continuity_suite": "CONTINUITY",
+  "traveller_sheets": {"Room": ["T1", "T2", "T3"], "Hot": ["HOT_T1", "HOT_T2"], "Cold": ["COLD_T1", "COLD_T2"]}
+}
