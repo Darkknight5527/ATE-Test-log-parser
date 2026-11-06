@@ -1,6 +1,6 @@
 # Builds the Windows app on GitHub's Windows machine.
 #  - every push to main: tests + build, zip kept as an artifact (Actions tab) for 30 days
-#  - a version tag (e.g. v0.2.0): also creates a GitHub Release with the zip attached (what users download)
+#  - a version tag (e.g. v0.3.0): also creates a GitHub Release with the zip attached (what users download)
 name: Build Windows app
 
 on:
@@ -14,14 +14,14 @@ permissions:
 
 env:
   APP_NAME: ATE_Log_Parser
-  ENTRY: app/gui.py
+  ENTRY: app/main.py
 
 jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - name: Install dependencies
@@ -33,7 +33,7 @@ jobs:
       - name: Tests (synthetic STDF only)
         run: python -m pytest -q tests
       - name: Build app
-        run: python -m PyInstaller --noconfirm --clean --onedir --windowed --paths . --name ${{ env.APP_NAME }} ${{ env.ENTRY }}
+        run: python -m PyInstaller --noconfirm --clean --onedir --windowed --paths . --paths app --hidden-import gui --add-data "app/ui;ui" --name ${{ env.APP_NAME }} ${{ env.ENTRY }}
       - name: Package
         shell: pwsh
         run: |
@@ -42,7 +42,7 @@ jobs:
           Copy-Item examples/example_profile.json dist/${{ env.APP_NAME }}/
           Compress-Archive -Path dist/${{ env.APP_NAME }}/* -DestinationPath "${{ env.APP_NAME }}-$ver-windows.zip"
           echo "ZIP=${{ env.APP_NAME }}-$ver-windows.zip" >> $env:GITHUB_ENV
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: ${{ env.ZIP }}
           path: ${{ env.ZIP }}

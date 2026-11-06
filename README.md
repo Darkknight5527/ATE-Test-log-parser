@@ -23,12 +23,16 @@ programmed (e.g. contact fails) are matched by count against earlier fails. Whic
 ## Download and use (no Python needed)
 1. Open **Releases** (right side of this page) and download `ATE_Log_Parser-<version>-windows.zip`.
 2. Unzip it and run `ATE_Log_Parser.exe` (Windows may warn because the app is not code-signed: *More info -> Run anyway*).
-3. **Import profile...** once (your device profile JSON), add the lot's STDF files or folder, optionally pick the traveller, **Generate**.
+3. **Import profile...** once (your device profile JSON), drop the lot's STDF files or folder on the window, optionally pick the traveller, **Generate report**.
+
+The window uses Microsoft Edge WebView2, which is already on Windows 10/11. If it is missing, the app opens a plain fallback window with the same functions.
 
 ## Run from source
 ```
 pip install -r requirements.txt
-python app/gui.py                                     # window
+python app/main.py                                    # window (pywebview)
+python app/gui.py                                     # plain fallback window (tkinter)
+# UI preview in a browser with demo data: open app/ui/index.html?demo
 python -m ate_log_parser <lot folder> --profile my.json --traveller traveller.xlsx   # command line
 python -m pytest tests                                # tests on generated (fake) STDF files
 ```

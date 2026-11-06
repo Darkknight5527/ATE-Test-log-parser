@@ -150,6 +150,29 @@ def read_stdf(path):
 
 
 
+def quick_info(path):
+    """Read only the file header (MIR) - fast, for listing files before a full run."""
+    with open(path, 'rb') as fh:
+        raw = fh.read(4096)
+    if raw[:2] == b'\x1f\x8b':
+        with gzip.open(path, 'rb') as gz:
+            raw = gz.read(4096)
+    if len(raw) < 6 or raw[2:4] != b'\x00\x0a':
+        raise ValueError('not an STDF file')
+    i = 0
+    while i + 4 <= len(raw):
+        ln, typ, sub = struct.unpack_from('<HBB', raw, i)
+        if (typ, sub) == (1, 10):
+            r = Rd(raw[i + 4:i + 4 + ln])
+            r.u4(); start = r.u4(); r.u1(); r.skip(3); r.u2(); r.skip(1)
+            names = ['lot', 'part', 'node', 'tester_type', 'job', 'job_rev', 'sblot', 'oper']
+            d = {k: r.cn() for k in names}
+            d['start'] = datetime.datetime(1970, 1, 1) + datetime.timedelta(seconds=start or 0)
+            return d
+        i += 4 + ln
+    return {}
+
+
 def add_fingerprint(f, profile):
     """Attach identity data to every run, using the test names given in the profile."""
     rb = (profile.get('readback_test') or '').lower()

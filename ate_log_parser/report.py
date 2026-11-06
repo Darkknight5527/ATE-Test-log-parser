@@ -66,7 +66,7 @@ def short_name(f, idx, stage):
     return ('%02d_%s_%s' % (idx, stage.replace(' ', ''), st.strftime('%m%d_%H%M') if st else ''))[:31]
 
 
-def build(inputs, output=None, profile=None, traveller=None, traveller_out=None, stats='pass', log=print):
+def build(inputs, output=None, profile=None, traveller=None, traveller_out=None, stats='pass', log=print, summary=None):
     from .profile import load
     profile = profile or load()
     ds.CONTI[0] = profile.get('continuity_suite', 'CONTINUITY')
@@ -307,6 +307,15 @@ def build(inputs, output=None, profile=None, traveller=None, traveller_out=None,
         build_fill_sheet(traveller, tout, lot_name, FL, units, tot, profile)
         outputs.append(tout)
 
+    if summary is not None:
+        summary['files'] = len(files)
+        summary['skipped'] = [dict(file=os.path.basename(p), why=why) for p, why, _ in skipped]
+        summary['outputs'] = outputs
+        summary['stages'] = [dict(device=dev, stage=t['stage'], files=t['files'], parts=t['parts'] - t['extra'], extra=t['extra'],
+                                  good_min=t['good_min'], good_max=t['good_max'], pass_runs=t['pass_runs'],
+                                  confirmed=t['confirmed'], possible=t['possible'], unseen=t['unseen'])
+                             for dev, v in traced.items() for t in v[3]]
+        summary['lot'] = next((f['mir'].get('lot') for f in files if f['mir'].get('lot')), '')
     lines = ['Report written: %s' % out] + (['Traveller copy: %s' % outputs[1]] if len(outputs) > 1 else [])
     for dev, (FL, units, role, tot, frows) in traced.items():
         for t in tot:
