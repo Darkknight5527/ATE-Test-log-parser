@@ -102,37 +102,42 @@ def trace(files, profile):
     for fi, f in enumerate(FL):
         U = [u for u in units if u.fi == fi]
         nb = sum(u.arr == 'burned' for u in U)
-        role[fi] = 'retest' if ('RETEST-name' in tags_of(f, profile) or (U and U[0].ins == 'Room' and nb > 0.2 * len(U))) else 'fresh'
+        role[fi] = 'retest' if ('RETEST-name' in tags_of(f, profile) or (U and U[0].ins == 'Room' and not U[0].stage.endswith('PostBake') and nb > 0.2 * len(U))) else 'fresh'
 
     same_d = profile.get('same_part_distance', {}); diff_d = profile.get('different_part_distance', {})
     pp_n = 0
     by_word = collections.defaultdict(list)
     failpool = collections.defaultdict(list)
     used = collections.defaultdict(set)
-    burned_pp, pp_last = {}, {}
+    burned_pp, pp_last, stage_last = {}, {}, {}
     for u in units:
         if u.arr == 'burned':
-            latest = {}
+            # earlier parts carrying the same ID word, split into parts already tested at this stage and parts not yet seen here
+            latest = {}   # latest earlier unit carrying this ID word, per part
             for c in by_word.get(u.arr_key, []):
                 if (c.fi, c.idx) < (u.fi, u.idx): latest[c.pp] = c
-            cands = list(latest.values())
-            same = [c for c in cands if pp_last[c.pp].stage == u.stage]
+            same = [c for pp, c in latest.items() if (pp, u.stage) in stage_last]
+            unseen = [pp_last[pp] for pp in latest if (pp, u.stage) not in stage_last]
+            res_here = {c.pp: stage_last[(c.pp, u.stage)].res for c in same}
             for c in same:
                 c._d = dist(u.post, c.post, u.job) if (u.post and c.post) else None
             SAME = same_d.get(u.ins, 0.1); DIFF = diff_d.get(u.ins, 99.0)
-            fails = [c for c in same if pp_last[c.pp].res == 'F']
-            passes = [c for c in same if pp_last[c.pp].res == 'P']
+            fails = [c for c in same if res_here[c.pp] == 'F']
+            passes = [c for c in same if res_here[c.pp] == 'P']
+            fresh = role[u.fi] == 'fresh'
             best = None
             if same:
                 ds = [c for c in same if c._d is not None]
                 closest = min(ds, key=lambda c: c._d) if ds else None
-                if passes and closest is not None and pp_last[closest.pp].res == 'P' and closest._d <= SAME and \
-                        not any(c._d is not None and c._d <= SAME for c in fails):
+                strong_fail = [c for c in fails if c._d is not None and c._d <= SAME]
+                if passes and closest is not None and res_here[closest.pp] == 'P' and closest._d <= SAME and not strong_fail:
                     best = closest; u.cls = 'CONFIRMED: passed part tested again at the same stage (measurements match)'
-                elif fails:
+                elif fails and (strong_fail or not (fresh and unseen)):
                     fd = [c for c in fails if c._d is not None]
                     best = min(fd, key=lambda c: c._d) if fd else max(fails, key=lambda c: (c.fi, c.idx))
                     u.cls = 'retest of earlier fail'
+                elif unseen:
+                    pass   # a part with this ID word has not been tested at this stage yet: that is the simplest explanation
                 elif passes:
                     pd = [c for c in passes if c._d is not None]
                     cl = min(pd, key=lambda c: c._d) if pd else None
@@ -144,15 +149,15 @@ def trace(files, profile):
                             'measurements in grey zone' if cl is not None else 'no measurements to compare')
                         u.link = 'possible match: ' + pm.ref(); u.dist = cl._d if cl is not None else None
                 u.amb = len(same)
-                if best is not None: u.dist = best._d
-            if best is None:
-                prev = [c for c in cands if pp_last[c.pp].stage != u.stage]
-                if prev:
-                    best = max(prev, key=lambda c: (pp_last[c.pp].res == 'P', c.fi, c.idx))
-                    if pp_last[best.pp].res == 'F' and not u.cls:
-                        u.cls = 'CHECK: first test at this stage, but its earlier result (%s) was FAIL' % best.stage
-                    u.cls = u.cls or 'first test at this stage (came from %s)' % best.stage
-                    u.amb = max(u.amb, len(prev))
+                if best is not None and u.dist is None: u.dist = best._d
+            if best is None and unseen:
+                best = max(unseen, key=lambda c: (c.res == 'P', c.fi, c.idx))
+                if best.res == 'F':
+                    u.cls = 'CHECK: first test at this stage, but its earlier result (%s) was FAIL' % best.stage
+                else:
+                    u.cls = 'first test at this stage (came from %s)' % best.stage + (
+                        '; ID word shared with %d part(s) already tested here' % len(same) if same else '')
+                u.amb = max(u.amb, len(unseen))
             if best is None:
                 pp_n += 1; u.pp = pp_n
                 u.cls = u.cls or 'programmed on arrival but not seen earlier in these files'
@@ -172,12 +177,32 @@ def trace(files, profile):
             else:
                 pp_n += 1; u.pp = pp_n; u.cls = 'new part (fresh file)'
         used[u.fi].add(u.pp)
-        pp_last[u.pp] = u
+        pp_last[u.pp] = u; stage_last[(u.pp, u.stage)] = u
         if u.word_key:
             by_word[u.word_key].append(u); burned_pp[u.pp] = True
         if u.res == 'F' and u.pp not in failpool[u.stage]: failpool[u.stage].append(u.pp)
         if u.res == 'P' and u.pp in failpool[u.stage]: failpool[u.stage].remove(u.pp)
     return FL, units, role
+
+
+def stage_flow(units):
+    """Parts that passed one stage but were never tested at the next stage, and parts tested at a stage without the one
+    before it. Stages in order of first appearance; Post-Bake stages are left out."""
+    order = []
+    for u in units:
+        if u.pp > 0 and 'PostBake' not in u.stage and u.stage not in order: order.append(u.stage)
+    last = {}
+    for u in units:
+        if u.pp > 0: last[(u.pp, u.stage)] = u
+    out = []
+    for a, b in zip(order, order[1:]):
+        at_a = {pp for (pp, s) in last if s == a}
+        at_b = {pp for (pp, s) in last if s == b}
+        for pp in sorted(at_a - at_b):
+            if last[(pp, a)].res == 'P': out.append(dict(kind='not seen at next stage', stage=b, prev=a, pp=pp, unit=last[(pp, a)]))
+        for pp in sorted(at_b - at_a):
+            out.append(dict(kind='skipped previous stage', stage=b, prev=a, pp=pp, unit=next(u for u in units if u.pp == pp and u.stage == b)))
+    return out
 
 
 def kind_of(u):

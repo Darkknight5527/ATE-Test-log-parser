@@ -17,7 +17,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter as L
 
 from . import daily_sheets as ds
-from .lot_trace import device_of, kind_of, stage_totals, tags_of, temperature_of, trace
+from .lot_trace import device_of, kind_of, stage_flow, stage_totals, tags_of, temperature_of, trace
 from .stdf_reader import add_fingerprint, read_stdf
 from .traveller import build_fill_sheet, file_rows
 
@@ -86,6 +86,9 @@ def build(inputs, output=None, profile=None, traveller=None, traveller_out=None,
         hashes[f['md5']] = p
         if not f['runs']:
             skipped.append((p, 'no part results in file', '')); continue
+        setup = [t for t in tags_of(f, profile) if t not in ('RETEST-name', 'POST-BAKE')]
+        if setup:
+            skipped.append((p, 'set-up file (%s) - listed, not counted in the lot' % ', '.join(setup), '')); continue
         add_fingerprint(f, profile)
         files.append(f)
     if not files:
@@ -93,11 +96,16 @@ def build(inputs, output=None, profile=None, traveller=None, traveller_out=None,
 
     groups = collections.defaultdict(list)
     for f in files: groups[device_of(f, profile)].append(f)
-    traced = {}
+    traced, flows = {}, {}
     for dev, FL in groups.items():
         log('Tracing parts for device %s (%d files)' % (dev, len(FL)))
         FLs, units, role = trace(FL, profile)
-        traced[dev] = (FLs, units, role, stage_totals(FLs, units), file_rows(FLs, units, profile))
+        tot = stage_totals(FLs, units); flow = stage_flow(units)
+        for t in tot:
+            t['missing'] = sum(1 for x in flow if x['stage'] == t['stage'] and x['kind'] == 'not seen at next stage')
+            t['skipped_prev'] = sum(1 for x in flow if x['stage'] == t['stage'] and x['kind'] == 'skipped previous stage')
+        flows[dev] = flow
+        traced[dev] = (FLs, units, role, tot, file_rows(FLs, units, profile))
     has_id = any(f.get('has_id') for f in files)
 
     wb = Workbook()
@@ -175,8 +183,9 @@ def build(inputs, output=None, profile=None, traveller=None, traveller_out=None,
     lcols = ['Device', 'Stage', 'Files', 'Test runs', 'Units (parts per file, summed)', 'Pass runs (adding up files)', 'Distinct parts tested',
              'Extra units (likely re-inserts)', 'Good parts (min)', 'Good parts (max)', 'Yield min', 'Yield max', 'Passes counted twice (max)',
              'CONFIRMED: passed part tested again', 'POSSIBLE repeats', 'Anonymous retests matched to earlier fails',
-             'Programmed parts not seen earlier', 'Failed earlier stage, tested at next']
-    _hdr(ls, 4, lcols, [10, 14, 7, 8, 10, 10, 10, 10, 9, 9, 8, 8, 10, 11, 10, 12, 11, 11])
+             'Programmed parts not seen earlier', 'Failed earlier stage, tested at next',
+             'Passed previous stage, never tested here', 'Tested here, skipped previous stage']
+    _hdr(ls, 4, lcols, [10, 14, 7, 8, 10, 10, 10, 10, 9, 9, 8, 8, 10, 11, 10, 12, 11, 11, 12, 12])
     r = 5
     for dev, (FL, units, role, tot, frows) in traced.items():
         for t in tot:
@@ -185,12 +194,12 @@ def build(inputs, output=None, profile=None, traveller=None, traveller_out=None,
             for ci, v in enumerate(vals, 1): _put(ls, r, ci, v)
             _put(ls, r, 11, '=IF(G%d=0,0,I%d/G%d)' % (r, r, r), fmt='0.0%'); _put(ls, r, 12, '=IF(G%d=0,0,J%d/G%d)' % (r, r, r), fmt='0.0%')
             _put(ls, r, 13, '=F%d-J%d' % (r, r))
-            for ci, k in enumerate(['confirmed', 'possible', 'anon_rt', 'unseen', 'check'], 14): _put(ls, r, ci, t[k])
+            for ci, k in enumerate(['confirmed', 'possible', 'anon_rt', 'unseen', 'check', 'missing', 'skipped_prev'], 14): _put(ls, r, ci, t.get(k, 0))
             r += 1
     lend = r - 1
     for colx in ('N', 'R'):
         ls.conditional_formatting.add('%s5:%s%d' % (colx, colx, lend), CellIsRule(operator='greaterThan', formula=['0'], fill=RED))
-    for colx in ('M', 'O', 'H', 'Q'):
+    for colx in ('M', 'O', 'H', 'Q', 'S', 'T'):
         ls.conditional_formatting.add('%s5:%s%d' % (colx, colx, lend), CellIsRule(operator='greaterThan', formula=['0'], fill=AMB))
     ls.freeze_panes = 'C5'
 
@@ -209,6 +218,17 @@ def build(inputs, output=None, profile=None, traveller=None, traveller_out=None,
                     round(u.dist, 3) if u.dist is not None else None]
             for ci, v in enumerate(vals, 1): _put(ex, r, ci, v)
             ex.cell(r, 9).fill = kinds[k][1]; r += 1
+    for dev, flow in flows.items():
+        for x in flow:
+            u = x['unit']
+            if x['kind'] == 'not seen at next stage':
+                typ, expl = 'Not tested at next stage', 'Part # %d passed %s (last here) but no %s test of it was found - check the part went to %s, or its %s test was matched to another part sharing its ID word' % (
+                    x['pp'], x['prev'], x['stage'], x['stage'], x['stage'])
+            else:
+                typ, expl = 'Skipped previous stage', 'Part # %d was tested at %s but no %s test of it was found' % (x['pp'], x['stage'], x['prev'])
+            vals = [dev, x['stage'], u.when(), sheet_of[u.file['path']], u.pid, u.res, u.hb, u.sb, typ, expl, u.ref(), None]
+            for ci, v in enumerate(vals, 1): _put(ex, r, ci, v)
+            ex.cell(r, 9).fill = AMB; r += 1
     if r == 4: _put(ex, 4, 1, 'No exceptions.', N)
     ex.freeze_panes = 'A4'; ex.auto_filter.ref = 'A3:L%d' % max(r - 1, 3)
 
@@ -278,6 +298,9 @@ def build(inputs, output=None, profile=None, traveller=None, traveller_out=None,
                              'parts share it the comparison measurements decide (same stage only).'),
         ('Passed part tested again', 'CONFIRMED when the closest earlier same-stage match is a PASS and measurements match closely; POSSIBLE when '
                                      'the word matches an earlier pass but measurements cannot decide (common at Hot/Cold).'),
+        ('Shared ID words', 'If a part with the same ID word has not been tested at this stage yet, an initial-test unit is taken as that part '
+                            '(its first test here) rather than a retest of an earlier fail or a repeat of an earlier pass - unless the '
+                            'measurements match the earlier unit closely. In retest files an earlier fail is preferred.'),
         ('Anonymous parts', 'Not programmed / no read: cannot be identified one by one. In a retest file they are matched by count to earlier '
                             'fails at that stage (each fail once per file); more than that = EXTRA. In a fresh Room file they are new parts. '
                             'At Hot/Cold they are parts already in the lot.'),
@@ -285,6 +308,10 @@ def build(inputs, output=None, profile=None, traveller=None, traveller_out=None,
                        'are only ever fails and never change the good count.'),
         ('Stages', 'Room / Hot / Cold from the profile rules on program and file name (+ Post-Bake as its own stage). A file is a retest file if its '
                    'name says so, or if more than 20% of its Room parts arrive already programmed.'),
+        ('Parts flow', 'Each part that passed a stage should be tested at the next one. Parts that passed but never appear at the next stage, '
+                       'or appear without the stage before, are listed in Exceptions - usually a part sharing an ID word was matched wrongly, '
+                       'or the part really skipped a stage.'),
+        ('Set-up files', 'Files whose name has a set-up word from the profile (e.g. SANITY) are listed in Files but not counted in the lot.'),
         ('Distance', 'Median over comparison tests of |difference| / normal part-to-part spread. Thresholds per stage are in the profile.'),
     ]
     for i, (a, b) in enumerate(text):
@@ -313,7 +340,8 @@ def build(inputs, output=None, profile=None, traveller=None, traveller_out=None,
         summary['outputs'] = outputs
         summary['stages'] = [dict(device=dev, stage=t['stage'], files=t['files'], parts=t['parts'] - t['extra'], extra=t['extra'],
                                   good_min=t['good_min'], good_max=t['good_max'], pass_runs=t['pass_runs'],
-                                  confirmed=t['confirmed'], possible=t['possible'], unseen=t['unseen'])
+                                  confirmed=t['confirmed'], possible=t['possible'], unseen=t['unseen'],
+                                  missing=t.get('missing', 0), skipped_prev=t.get('skipped_prev', 0))
                              for dev, v in traced.items() for t in v[3]]
         summary['lot'] = next((f['mir'].get('lot') for f in files if f['mir'].get('lot')), '')
     lines = ['Report written: %s' % out] + (['Traveller copy: %s' % outputs[1]] if len(outputs) > 1 else [])

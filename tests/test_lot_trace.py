@@ -82,3 +82,38 @@ def test_generic_profile_runs_without_ids(tmp_path):
     outs, lines = build([os.path.join(str(tmp_path), 'LOTX_DEV1_ROOM_1.stdf')], os.path.join(str(tmp_path), 'g.xlsx'),
                         prof.load(), log=lambda s: None)
     assert os.path.exists(outs[0])
+
+
+def test_shared_id_word_at_hot_is_a_new_part_not_a_retest(tmp_path):
+    """Two parts share one ID word. At Hot the first one fails; the second one arrives in a later initial (fresh) Hot file.
+    It must be counted as the second part's first Hot test - not as a retest of the first part's fail."""
+    d = str(tmp_path); rnd = random.Random(3)
+    shared = 0b10101010
+    others = [0b1000000 + i for i in range(15)]
+    pa = [rnd.uniform(-5, 5) for _ in range(8)]; pb = [rnd.uniform(-5, 5) for _ in range(8)]
+    op = [[rnd.uniform(-5, 5) for _ in range(8)] for _ in others]
+    room = [w.part(1, 0, shared, pa), w.part(2, 0, shared, pb)] + [w.part(3 + i, 0, wd, pv) for i, (wd, pv) in enumerate(zip(others, op))]
+    w.write(os.path.join(d, 'LOTY_DEV1_ROOM_1.stdf'), 'LOTY', 'PROG_DEV1_Room', T0, room)
+    hot1 = [w.part(1, shared, shared, [v * 1.3 + 0.7 for v in pa], ok=False)] + \
+           [w.part(2 + i, wd, wd, pv) for i, (wd, pv) in enumerate(zip(others, op))]
+    w.write(os.path.join(d, 'LOTY_DEV1_HOT_1.stdf'), 'LOTY', 'PROG_DEV1_Hot', T0 + 3600, hot1)
+    hot2 = [w.part(1, shared, shared, [v * 1.3 - 0.9 for v in pb])]
+    w.write(os.path.join(d, 'LOTY_DEV1_HOT_2.stdf'), 'LOTY', 'PROG_DEV1_Hot', T0 + 7200, hot2)
+    files = [add_fingerprint(read_stdf(os.path.join(d, n)), PROFILE)
+             for n in ('LOTY_DEV1_ROOM_1.stdf', 'LOTY_DEV1_HOT_1.stdf', 'LOTY_DEV1_HOT_2.stdf')]
+    FL, units, role = trace(files, PROFILE)
+    tot = {t['stage']: t for t in stage_totals(FL, units)}
+    assert tot['Hot']['parts'] == 17                  # every Room part reached Hot once
+    assert tot['Hot']['good_max'] == 16               # the shared-word part that failed is still a fail
+    last_hot = [u for u in units if u.stage == 'Hot'][-1]
+    assert last_hot.cls.startswith('first test at this stage')
+
+
+def test_setup_files_are_listed_not_counted(tmp_path):
+    d = str(tmp_path)
+    make_lot(d)
+    w.write(os.path.join(d, 'LOTX_DEV1_HOT_SANITY.stdf'), 'LOTX', 'PROG_DEV1_Hot', T0 + 9000, [w.part(1, 0b10110001, 0b10110001, [0] * 8)])
+    s = {}
+    outs, lines = build([d], os.path.join(d, 'r.xlsx'), PROFILE, log=lambda x: None, summary=s)
+    assert any('SANITY' in x['why'] for x in s['skipped'])
+    assert {t['stage']: t for t in s['stages']}['Hot']['parts'] == 5

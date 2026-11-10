@@ -137,12 +137,14 @@ function renderResult(sum) {
   const conf = (sum.stages || []).reduce((a, t) => a + (t.confirmed || 0), 0);
   const poss = (sum.stages || []).reduce((a, t) => a + (t.possible || 0), 0);
   const extra = (sum.stages || []).reduce((a, t) => a + (t.extra || 0), 0);
+  const miss = (sum.stages || []).reduce((a, t) => a + (t.missing || 0) + (t.skipped_prev || 0), 0);
   const sk = (sum.skipped || []).length;
   $('#flags').innerHTML =
     `<span class="chip ${conf ? 'flag-bad' : 'flag-ok'}">${conf} confirmed repeat${conf === 1 ? '' : 's'} of a passed part</span>` +
     (poss ? `<span class="chip flag-warn">${poss} possible repeat${poss === 1 ? '' : 's'}</span>` : '') +
     (extra ? `<span class="chip flag-warn">${extra} extra insert${extra === 1 ? '' : 's'}</span>` : '') +
-    (sk ? `<span class="chip">${sk} file${sk === 1 ? '' : 's'} skipped</span>` : '');
+    (miss ? `<span class="chip flag-warn" title="Parts that passed a stage but were not found at the next one (see Exceptions)">${miss} part${miss === 1 ? '' : 's'} missing a stage</span>` : '') +
+    (sk ? `<span class="chip">${sk} file${sk === 1 ? '' : 's'} not counted</span>` : '');
   const outs = sum.outputs || [];
   $('#outBtns').innerHTML = outs.map((o, i) =>
     `<button class="${i ? 'btn-ghost' : 'btn-primary'}" data-p="${esc(o)}">${i ? 'Open traveller copy' : 'Open report'}</button>`).join('') +
