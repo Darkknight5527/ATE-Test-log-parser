@@ -1,20 +1,20 @@
 # Builds the Windows app on GitHub's Windows machine.
-#  - every push to main: tests + build, zip kept as an artifact (Actions tab) for 30 days
-#  - a version tag (e.g. v0.3.0): also creates a GitHub Release with the zip attached (what users download)
+#  - every push to main: data check + tests + build, zip kept as an artifact (Actions tab) for 30 days
+#  - a version tag (e.g. v2.6.0): also creates a GitHub Release with the zip attached (what users download)
 name: Build Windows app
 
 on:
   push:
     branches: [main]
     tags: ['v*']
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: write
 
 env:
-  APP_NAME: ATE_Log_Parser
-  ENTRY: app/main.py
+  APP_NAME: Lot_Yield_Viewer
 
 jobs:
   build:
@@ -33,7 +33,7 @@ jobs:
       - name: Tests (synthetic STDF only)
         run: python -m pytest -q tests
       - name: Build app
-        run: python -m PyInstaller --noconfirm --clean --onedir --windowed --paths . --paths app --hidden-import gui --add-data "app/ui;ui" --name ${{ env.APP_NAME }} ${{ env.ENTRY }}
+        run: python -m PyInstaller --noconfirm --clean --onedir --windowed --add-data "ui;ui" --hidden-import stdf_lot_yield_summary --hidden-import viewer_core --hidden-import profiles --hidden-import file_sheets --hidden-import datalog_reader --hidden-import datalog_sheets --name ${{ env.APP_NAME }} lot_yield_app.py
       - name: Package
         shell: pwsh
         run: |

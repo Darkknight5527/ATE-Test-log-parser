@@ -1,41 +1,90 @@
-# ATE Test Log Parser
+# Lot Yield Viewer
 
-Windows desktop tool for semiconductor test datalogs (STDF V4, e.g. Advantest V93000).
-Give it the STDF files of one lot and it produces:
+A Windows desktop app for semiconductor final-test datalogs (STDF V4). Drop in a lot's STDF files and you get,
+without writing a report first:
 
-1. **Lot report** (Excel)
-   - **Summary** - one row per file: stage (Room / Hot / Cold), fresh or retest, parts, pass / fail, what is in the file, tester cross-check
-   - **Lot Summary** - every physical part counted **once**: distinct parts and good parts per stage, versus simply adding up files
-   - **Exceptions** - parts that had already passed and were tested again, extra parts in retest files, parts never seen before
-   - **Part Journeys** - every part's path through the lot, e.g. `Room:F > Room:P > Hot:P > Cold:P`
-   - **Unit Ledger**, **Files**, **Method**
-   - one sheet per STDF in the classic datalog-viewer layout (yield, reject pareto, Cpk, statistics, all unit values)
-2. **Lot traveller fill-in** (optional) - a copy of your traveller with an extra *STDF Fill-in* sheet:
-   the values for every test-sheet block (start/stop, lot size, pass/fail, bins), a check against what is already filled in,
-   and lot totals without duplicates. The traveller itself is never modified.
+- **Detailed Info** - every file at a glance (tests run, unique chips, retested, pass, fail, yield, lot, program,
+  tester), per-test statistics (limits, mean, std dev, Cp, Cpk) and a **test-limits table** that shows where Hot or
+  Cold limits differ from Room.
+- **Charts** - trend of one test across all runs, and correlation / delta of the *same physical chip* between two
+  insertions (e.g. Room vs Hot).
+- **Lot Traveller** - the numbers to type into the lot traveller, per test block (start / stop, lot size, pass, bins),
+  with copy buttons.
+- **Production Lots** - saved lots (just file paths, the files stay where they are), "check folder for new files",
+  and a multi-stage recovery waterfall.
+- **Report** - an Excel workbook: final lot summary, waterfall per insertion, files, parts ledger, exceptions, and
+  (optional) **one datalog sheet per STDF file** with yield / fail summary, reject pareto, Cpk, statistics and every
+  test value of every run.
 
-## How parts are recognised
-Part IDs in STDF restart in every file, so they cannot link files. Parts are linked by an **ID word programmed into the part**
-(read back at the start of the test flow) plus **comparison measurements** when several parts share a word. Parts that never got
-programmed (e.g. contact fails) are matched by count against earlier fails. Which tests to use is set in a **device profile**
-(see `examples/example_profile.json`) - profiles stay on your PC and are never committed.
+## How chips are counted
 
-## Download and use (no Python needed)
-1. Open **Releases** (right side of this page) and download `ATE_Log_Parser-<version>-windows.zip`.
-2. Unzip it and run `ATE_Log_Parser.exe` (Windows may warn because the app is not code-signed: *More info -> Run anyway*).
-3. **Import profile...** once (your device profile JSON), drop the lot's STDF files or folder on the window, optionally pick the traveller, **Generate report**.
+A lot is tested at several insertions (Room, Post-Bake, Hot, Cold), each with first runs and retests, and the same
+chip can be inserted again under a new Part ID. Adding up the files therefore counts chips twice. The viewer counts
+**physical chips**:
 
-The window uses Microsoft Edge WebView2, which is already on Windows 10/11. If it is missing, the app opens a plain fallback window with the same functions.
+- a chip retested on the following rows of one file is one chip (last result wins);
+- chips are followed from file to file by the **fuse ID** the test program burns into them (read-back value and
+  per-bit fuse tests), with post-trim measurements as a tie-break when two chips share an ID;
+- chips that failed before the fuse was burned carry no ID; they are matched as a pool against later retests;
+- a chip is good only if it passed every insertion the lot was screened at;
+- **chips off the test flow** are listed: passed an insertion but never tested at the next one (on hold), skipped an
+  insertion but showed up at a later one, or failed an insertion but were still tested further.
 
-## Run from source
+## Device profile
+
+Which tests carry the fuse ID is different for every product, so it is **not in the code**. It lives in a small JSON
+file on your PC (see [`examples/example_profile.json`](examples/example_profile.json)) that you import once with the
+**Profile** button (top right). Profiles are stored in `%APPDATA%\lot_yield_app\profiles`. Without a profile the app
+still works, but chips are only followed by Part ID inside a file.
+
+| key | meaning |
+|---|---|
+| `readback_test` | part of the name of the test whose value is the fuse word read back from the chip |
+| `fuse_bits_prefix`, `fuse_bit_regex`, `fuse_bank`, `blown_above` | per-bit fuse tests: name start, pattern with a `bit` group (and optional `bank`), which bank, resistance above which a bit is blown |
+| `match_tests` | name starts of post-trim tests used to tell apart two chips with the same fuse word |
+| `burn_fail_bins`, `burn_check_bins` | soft-bin name words for "failed while burning the fuse" / "check before burning" |
+| `device_regex` | device version from program / file name (files are analysed per version) |
+| `lot_regex`, `lot_prefix` | lot number from lot ID or folder name |
+| `exclude_regex` | file names to leave out (sanity-check files are always left out) |
+
+## Use
+
+**App (no Python needed):** download `Lot_Yield_Viewer-<version>-windows.zip` from
+[Releases](../../releases/latest), unzip, run `Lot_Yield_Viewer.exe`. If Windows says "Windows protected your PC",
+click *More info* -> *Run anyway* (the app is not code-signed).
+
+**From source:**
+
 ```
 pip install -r requirements.txt
-python app/main.py                                    # window (pywebview)
-python app/gui.py                                     # plain fallback window (tkinter)
-# UI preview in a browser with demo data: open app/ui/index.html?demo
-python -m ate_log_parser <lot folder> --profile my.json --traveller traveller.xlsx   # command line
-python -m pytest tests                                # tests on generated (fake) STDF files
+python lot_yield_app.py                                        # the app
+python stdf_lot_yield_summary.py -i <lot folder> -o report.xlsx --profile my_profile.json   # command line
+python get_limits.py <file or folder> [test number or name]    # print test limits
+Build_Lot_Yield_Viewer_exe.bat                                 # build the .exe yourself
 ```
 
+The command line uses the profile last chosen in the app when `--profile` is not given.
+
+## Development
+
+- `stdf_lot_yield_summary.py` - STDF reading and the chip counting (also the command line)
+- `viewer_core.py` - data behind the tabs, reading cache, saved lots
+- `lot_yield_app.py` + `ui/` - the window (pywebview / Edge WebView2, Chart.js)
+- `profiles.py` - device profiles
+- `file_sheets.py`, `datalog_reader.py`, `datalog_sheets.py` - per-file datalog sheets
+- `tests/` - pytest on synthetic STDF files written by `tests/stdf_writer.py`
+
+Every push builds the app on GitHub Actions (data-safety check, tests, PyInstaller); a `v*` tag publishes a release.
+
+## History
+
+Up to v0.3.1 this repo held **ATE Log Parser** (STDF lot report + lot traveller fill-in). Its releases are still
+on the Releases page and its code is in the git history; its per-file datalog sheets, device profiles, test-flow
+checks, tests and build pipeline now live in this app.
+
 ## Data policy
-Code only - no tester data, reports, profiles or company information. See [DATA_POLICY.md](DATA_POLICY.md).
+
+Code only - no datalogs, reports, profiles or company / product names. See [DATA_POLICY.md](DATA_POLICY.md);
+enforced by `.gitignore` and `tools/check_repo_clean.py` (install the pre-commit hook with `tools/install_hooks.bat`).
+
+Fonts: Outfit (SIL Open Font License, `ui/fonts/OFL-Outfit.txt`). Charts: Chart.js (MIT).

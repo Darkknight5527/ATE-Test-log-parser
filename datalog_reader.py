@@ -1,14 +1,5 @@
-"""STDF V4 reader (little-endian, as written by Advantest V93000 SmarTest).
-
-read_stdf(path) -> dict with
-  mir      : lot / part / job (program) / operator / tester / start time ...
-  finish   : MRR finish time (or None)
-  tests    : OrderedDict key=(test number, name without [site]) -> name, unit, limits, flow position
-  runs     : one dict per PRR: sn (part id), hb, sb, failed, tt (ms), vals {test key: value}, fails [test keys]
-  hbr/sbr  : tester bin summaries, pcr: part counts
-add_fingerprint(f, profile) adds per run: id_read (read-back value, 0 = not programmed, None = not reached),
-  word (burned word from blown-bit test names), post {test name: value} for the comparison tests.
-"""
+"""Full STDF V4 reader used for the per-file datalog sheets (every test of every run, with the run's X/Y, test time,
+failing tests in order, bins, MIR header details). The lot counting itself uses stdf_lot_yield_summary.py."""
 import datetime, gzip, hashlib, re, struct
 from collections import OrderedDict
 
@@ -145,59 +136,4 @@ def read_stdf(path):
             h, s, pc, rc, ab, gd = r.u1(), r.u1(), r.u4(), r.u4(), r.u4(), r.u4()
             if h == 255 or f['pcr'] is None:
                 f['pcr'] = dict(parts=pc, retests=rc, good=gd)
-    return f
-
-
-
-
-def quick_info(path):
-    """Read only the file header (MIR) - fast, for listing files before a full run."""
-    with open(path, 'rb') as fh:
-        raw = fh.read(4096)
-    if raw[:2] == b'\x1f\x8b':
-        with gzip.open(path, 'rb') as gz:
-            raw = gz.read(4096)
-    if len(raw) < 6 or raw[2:4] != b'\x00\x0a':
-        raise ValueError('not an STDF file')
-    i = 0
-    while i + 4 <= len(raw):
-        ln, typ, sub = struct.unpack_from('<HBB', raw, i)
-        if (typ, sub) == (1, 10):
-            r = Rd(raw[i + 4:i + 4 + ln])
-            r.u4(); start = r.u4(); r.u1(); r.skip(3); r.u2(); r.skip(1)
-            names = ['lot', 'part', 'node', 'tester_type', 'job', 'job_rev', 'sblot', 'oper']
-            d = {k: r.cn() for k in names}
-            d['start'] = datetime.datetime(1970, 1, 1) + datetime.timedelta(seconds=start or 0)
-            return d
-        i += 4 + ln
-    return {}
-
-
-def add_fingerprint(f, profile):
-    """Attach identity data to every run, using the test names given in the profile."""
-    rb = (profile.get('readback_test') or '').lower()
-    bit_re = re.compile(profile['blown_bit_regex']) if profile.get('blown_bit_regex') else None
-    suites = set(profile.get('compare_suites') or [])
-    T = f['tests']
-    rb_keys = [k for k in T if rb and rb in T[k]['name'].lower()]
-    for r in f['runs']:
-        vals = r['vals']
-        r['id_read'] = next((vals[k] for k in rb_keys if k in vals), None)
-        bits, seen = set(), False
-        post = {}
-        for k, v in vals.items():
-            n = T[k]['name']
-            if bit_re is not None:
-                m = bit_re.search(n)
-                if m:
-                    seen = True
-                    if not m.groupdict().get('un'):
-                        bits.add(int(m.group('bit')))
-                    continue
-            if suites and n.split(':')[0] in suites and isinstance(v, float):
-                post[re.sub(r'\[\d+\]$', '', n)] = v
-        r['word'] = sum(1 << b for b in bits) if seen else None
-        r['post'] = post
-        r['first_fail'] = T[r['fails'][0]]['name'] if r['fails'] else ''
-    f['has_id'] = bool(rb_keys)
     return f

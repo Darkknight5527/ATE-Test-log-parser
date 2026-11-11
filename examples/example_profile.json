@@ -1,11 +1,16 @@
 {
-  "name": "Example device (fake test names - copy and edit for your product)",
-  "readback_test": "Read_Device_ID",
-  "blown_bit_regex": "ID_BIT(?P<bit>\\d+)_(?P<un>UN)?PROGRAMMED",
-  "compare_suites": ["Post_Trim_Gain", "Post_Trim_Offset", "UVLO_Threshold"],
-  "device_regex": "(DEV\\d+)",
-  "temperature_rules": [["Cold", "COLD|_-40_"], ["Hot", "HOT|_125_"], ["Room", "ROOM|_25_"]],
-  "excluded_tags": ["SANITY", "FIFO", "ENG", "SAMPLE"],
-  "continuity_suite": "CONTINUITY",
-  "traveller_sheets": {"Room": ["T1", "T2", "T3"], "Hot": ["HOT_T1", "HOT_T2"], "Cold": ["COLD_T1", "COLD_T2"]}
+  "name": "Example device (edit me)",
+  "readback_test": "Read_ID",
+  "fuse_bits_prefix": "FUSE_RES",
+  "fuse_bit_regex": "BANK(?P<bank>[A-Z])_\\w*?(?P<un>UN)?BLOWN_BIT(?P<bit>\\d+)",
+  "fuse_bank": "A",
+  "blown_above": 1000.0,
+  "match_tests": ["Post_Trim_", "Vref_Final", "Osc_Freq_Final"],
+  "burn_fail_bins": ["FUSE_BURN", "FUSE_VERIFY"],
+  "burn_check_bins": ["FUSE_BLANK_CHECK"],
+  "device_regex": "(DEV[0-9]+)",
+  "lot_regex": "LOT0*(\\d+)",
+  "lot_prefix": "LOT",
+  "exclude_regex": "FIFO|BOARD",
+  "continuity_suite": "CONTINUITY"
 }
